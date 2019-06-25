@@ -147,6 +147,9 @@ For data:
 
 `python crab.py -p data_NANO.py -o /store/user/$USER/outputdir -t NanoTuples-[version] -i data.txt --num-cores 4 -s EventAwareLumiBased -n 100000 --work-area crab_projects_data --dryrun`
 
+For Private MC:
+
+`python crab_private.py -p mc[year]_NANO.py -o /store/user/$USER/outputdir -t NanoTuples-[version] -i [input].txt --num-cores 1 -s FileBased -n 10 --work-area crab_projects_mc_[year] --dryrun`
 
 A JSON file can be applied for data samples with the `-j` options.
 
