@@ -3,14 +3,18 @@ from __future__ import print_function
 from multiprocessing import Process
 
 import argparse
-import subprocess
-import os
 import re
 import logging
 
 from CRABAPI.RawCommand import crabCommand
-#from CRABClient.ClientExceptions import ClientException
+from CRABClient.ClientExceptions import ClientException
 from httplib import HTTPException
+
+
+def natural_sort(l):
+    convert = lambda text: int(text) if text.isdigit() else text.lower()
+    alphanum_key = lambda key: [convert(c) for c in re.split('([0-9]+)', key)]
+    return sorted(l, key=alphanum_key)
 
 
 def configLogger(name, loglevel=logging.INFO):
@@ -22,22 +26,8 @@ def configLogger(name, loglevel=logging.INFO):
     console.setFormatter(logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s'))
     logger.addHandler(console)
 
-
 logger = logging.getLogger(__name__)
 configLogger(__name__)
-
-
-def natural_sort(l):
-    convert = lambda text: int(text) if text.isdigit() else text.lower()
-    alphanum_key = lambda key: [convert(c) for c in re.split('([0-9]+)', key)]
-    return sorted(l, key=alphanum_key)
-
-
-def runCrabCommand(command, *args, **kwargs):
-    try:
-        return crabCommand(command, *args, **kwargs)
-    except Exception as e:
-        logger.error(getattr(e, 'message', repr(e)))
 
 
 def parseDatasetName(dataset):
@@ -62,14 +52,19 @@ def parseDatasetName(dataset):
         ext = '_' + ver
     return procname, vername, ext, isMC
 
+def parsePrivateDatasetName(dataset):
+    return dataset.split('/')[-1].split('.')[0]
 
 def createConfig(args, dataset):
     from CRABClient.UserUtilities import config
     config = config()
 
-    procname, vername, ext, isMC = parseDatasetName(dataset)
-
-    config.General.requestName = procname + ext
+    isMC = True
+    ext = ""
+    vername = ""
+    procname = parsePrivateDatasetName(dataset)
+    print(procname)
+    config.General.requestName = procname
     config.General.workArea = args.work_area
     config.General.transferOutputs = True
     config.General.transferLogs = False
@@ -79,21 +74,19 @@ def createConfig(args, dataset):
     config.JobType.sendExternalFolder = args.send_external
     config.JobType.numCores = args.num_cores
     config.JobType.maxMemoryMB = args.max_memory
-    if args.set_input_dataset:
-        config.JobType.pyCfgParams = ['inputDataset=%s' % dataset]
 
     config.Data.inputDBS = 'global'
-    config.Data.inputDataset = dataset
+    #config.Data.inputDataset = dataset
+    config.Data.userInputFiles = open(dataset).readlines()
+    config.Data.outputPrimaryDataset = procname 
     config.Data.splitting = args.splitting
     config.Data.unitsPerJob = args.units_per_job
-    if args.max_units > 0:
-        config.Data.totalUnits = args.max_units
-    if args.no_publication:
-        config.Data.publication = False
-    config.Data.outputDatasetTag = args.tag + '_' + vername
+    #if args.no_publication:
+    config.Data.publication = False
+    config.Data.outputDatasetTag = args.tag + '_' + procname
     config.Data.allowNonValidInputDataset = True
     config.Data.outLFNDirBase = args.outputdir
-
+    
     if not isMC and args.json:
         config.Data.lumiMask = args.json
 
@@ -104,50 +97,21 @@ def createConfig(args, dataset):
         config.Site.blacklist = options['siteblacklist'].split(',')
 
     if args.fnal:
-        config.Data.ignoreLocality = True
+        #config.Data.ignoreLocality = True
         config.Site.whitelist = ['T3_US_FNALLPC']
         config.Site.ignoreGlobalBlacklist = True
 
-    # write config file
-    cfgdir = os.path.join(args.work_area, 'configs')
-    if not os.path.exists(cfgdir):
-        os.makedirs(cfgdir)
-    cfgpath = os.path.join(cfgdir, config.General.requestName + '.py')
-    with open(cfgpath, 'w') as f:
-        f.write(str(config))
-
-    return config, cfgpath
+    return config
 
 
 def parseOptions(args):
-
-    def convertValue(v):
-        if v.lower() == 'true':
-            v = True
-        elif v.lower() == 'false':
-            v = False
-        return v
-
     options = {}
     if args.options:
-        prev = None
         for opt in args.options.split():
-            if '=' in opt:
-                k, v = opt.split('=')
-                if k.startswith('--'):
-                    k = k[2:]
-                options[k] = convertValue(v)
-            else:
-                if opt.startswith('--'):
-                    if prev is None:
-                        prev = opt[2:]
-                        continue
-                    else:
-                        options[prev] = True
-                        prev = opt[2:]
-                else:
-                    options[prev] = convertValue(opt)
-                    prev = None
+            k, v = opt.split('=')
+            if k.startswith('--'):
+                k = k[2:]
+            options[k] = v
     return options
 
 
@@ -155,7 +119,10 @@ def killjobs(args):
     import os
     for dirname in os.listdir(args.work_area):
         logger.info('Kill job %s' % dirname)
-        runCrabCommand('kill', dir='%s/%s' % (args.work_area, dirname))
+        try:
+            crabCommand('kill', dir='%s/%s' % (args.work_area, dirname))
+        except:
+            pass
 
 
 def resubmit(args):
@@ -163,7 +130,10 @@ def resubmit(args):
     kwargs = parseOptions(args)
     for dirname in os.listdir(args.work_area):
         logger.info('Resubmitting job %s with options %s' % (dirname, str(kwargs)))
-        runCrabCommand('resubmit', dir='%s/%s' % (args.work_area, dirname), **kwargs)
+        try:
+            crabCommand('resubmit', dir='%s/%s' % (args.work_area, dirname), **kwargs)
+        except:
+            pass
 
 
 def _analyze_crab_status(ret):
@@ -193,13 +163,13 @@ def _analyze_crab_status(ret):
 def status(args):
     import os
     kwargs = parseOptions(args)
-    jobnames = [d for d in os.listdir(args.work_area) if d.startswith('crab_')]
+    jobnames = os.listdir(args.work_area)
     finished = 0
     job_status = {}
     submit_failed = []
     for dirname in jobnames:
         logger.info('Checking status of job %s' % dirname)
-        ret = runCrabCommand('status', dir='%s/%s' % (args.work_area, dirname))
+        ret = crabCommand('status', dir='%s/%s' % (args.work_area, dirname))
         states = _analyze_crab_status(ret)
         try:
             percent_finished = 100.*states['finished'] / sum(states.values())
@@ -207,22 +177,17 @@ def status(args):
             percent_finished = 0
         pcts_str = ' (\033[1;%dm%.1f%%\033[0m)' % (32 if percent_finished > 90 else 34 if percent_finished > 70 else 35 if percent_finished > 50 else 31, percent_finished)
         job_status[dirname] = ret['status'] + pcts_str + '\n    ' + str(states)
-        if ret['publicationEnabled']:
-            pcts_published = 100.*ret['publication'].get('done', 0) / max(sum(states.values()), 1)
-            pub_pcts_str = '\033[1;%dm%.1f%%\033[0m' % (32 if pcts_published > 90 else 34 if pcts_published > 70 else 35 if pcts_published > 50 else 31, pcts_published)
-            job_status[dirname] = job_status[dirname] + '\n    publication: ' + pub_pcts_str + ' ' + str(ret['publication'])
-
         if ret['status'] == 'COMPLETED':
             finished += 1
         elif ret['dbStatus'] == 'SUBMITFAILED':
             submit_failed.append(ret['inputDataset'])
-        elif states.get('failed', 0) > 0 and 'killed' not in ret['status'].lower() and not args.no_resubmit:
-                logger.info('Resubmitting job %s with options %s' % (dirname, str(kwargs)))
-                runCrabCommand('resubmit', dir='%s/%s' % (args.work_area, dirname), **kwargs)
-
-        if ret['publication'].get('failed', 0) > 0:
-            logger.info('Resubmitting job %s for failed publication' % dirname)
-            runCrabCommand('resubmit', dir='%s/%s' % (args.work_area, dirname), publication=True)
+        else:
+            try:
+                if states['failed'] > 0 and not args.no_resubmit:
+                    logger.info('Resubmitting job %s with options %s' % (dirname, str(kwargs)))
+                    crabCommand('resubmit', dir='%s/%s' % (args.work_area, dirname), **kwargs)
+            except:
+                pass
 
     logger.info('====== Summary ======\n' +
                  '\n'.join(['%s: %s' % (k, job_status[k]) for k in natural_sort(job_status.keys())]))
@@ -244,16 +209,12 @@ def main():
                         help='Path to the CMSSW configuration file'
                         )
     parser.add_argument('-s', '--splitting',
-                        default='Automatic', choices=['Automatic', 'FileBased', 'LumiBased', 'EventAwareLumiBased'],
+                        default='FileBased', choices=['Automatic', 'FileBased', 'LumiBased', 'EventAwareLumiBased'],
                         help='Job splitting method. Default: %(default)s'
                         )
     parser.add_argument('-n', '--units-per-job',
                         default=300, type=int,
                         help='Units per job. The meaning depends on the splitting. Recommended default numbers: (Automatic: 300 min, LumiBased:100, EventAwareLumiBased:100000) Default: %(default)d'
-                        )
-    parser.add_argument('--max-units',
-                        default=-1, type=int,
-                        help='Max units per job. The meaning depends on the splitting. Default: %(default)d'
                         )
     parser.add_argument('-t', '--tag',
                         default='NanoHRT',
@@ -274,10 +235,6 @@ def main():
     parser.add_argument('--no-publication',
                         action='store_true', default=False,
                         help='Do not publish the output dataset. Default: %(default)s'
-                        )
-    parser.add_argument('--set-input-dataset',
-                        action='store_true', default=False,
-                        help='Set the inputDataset parameter to the python config file. Default: %(default)s'
                         )
     parser.add_argument('--work-area',
                         default='crab_projects',
@@ -333,23 +290,16 @@ def main():
         killjobs(args)
         return
 
-    submit_failed = []
-    with open(args.inputfile) as inputfile:
-        for l in inputfile:
-            l = l.strip()
-            if not l or l.startswith('#'):
-                continue
-            dataset = [s for s in l.split() if '/MINIAOD' in s][0]
-            cfg, cfgpath = createConfig(args, dataset)
-            if args.dryrun:
-                print('-' * 50)
-                print(cfg)
-                continue
-            logger.info('Submitting dataset %s' % dataset)
-<<<<<<< HEAD
-            p = Process(target=submit, args=(cfg,))
-            p.start()
-            p.join()
+    #dataset = open(args.inputfile).readlines()#[s for s in l.split()][0] #if '/MINIAOD' in s][0]
+    cfg = createConfig(args, args.inputfile)
+    if args.dryrun:
+        print('-' * 50)
+        print(cfg)
+    else:
+        logger.info('Submitting dataset %s' % args.inputfile)
+        p = Process(target=submit, args=(cfg,))
+        p.start()
+        p.join()
 
 def submit(config):
     try:
@@ -358,17 +308,6 @@ def submit(config):
         print('Failed submitting task: %s' %(hte.headers))
     except ClientException as cle:
         print('Failed submitting task: %s' %(cle))
-=======
-            cmd = 'crab submit -c {cfgpath}'.format(cfgpath=cfgpath)
-            p = subprocess.Popen(cmd, shell=True)
-            p.communicate()
-            if p.returncode != 0:
-                submit_failed.append(cfgpath)
-#             runCrabCommand('submit', config=cfg)
-
-    if len(submit_failed):
-        logger.warning('Submit failed:\n%s' % '\n'.join(submit_failed))
->>>>>>> 7136cfb684551e08fb1c359516e436b592754bb0
 
 
 if __name__ == '__main__':

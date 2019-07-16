@@ -2,7 +2,7 @@
 # using: 
 # Revision: 1.19 
 # Source: /local/reps/CMSSW/CMSSW/Configuration/Applications/python/ConfigBuilder.py,v 
-# with command line options: mc -n -1 --mc --eventcontent NANOAODSIM --datatier NANOAODSIM --conditions 102X_upgrade2018_realistic_v12 --step NANO --era Run2_2018,run2_nanoAOD_102Xv1 --customise PhysicsTools/NanoTuples/nanoTuples_cff.nanoTuples_customizeMC --filein file:step-1.root --fileout file:nano.root --no_exec --customise_commands=process.add_(cms.Service('InitRootHandlers', EnableIMT = cms.untracked.bool(False)))
+# with command line options: mc2018 -n -1 --mc --eventcontent NANOAODSIM --datatier NANOAODSIM --conditions 102X_upgrade2018_realistic_v19 --step NANO --nThreads 4 --era Run2_2018,run2_nanoAOD_102Xv1 --customise PhysicsTools/NanoTuples/nanoTuples_cff.nanoTuples_customizeMC --filein file:step-1.root --fileout file:nano.root --no_exec
 import FWCore.ParameterSet.Config as cms
 
 from Configuration.StandardSequences.Eras import eras
@@ -22,12 +22,12 @@ process.load('Configuration.StandardSequences.EndOfProcess_cff')
 process.load('Configuration.StandardSequences.FrontierConditions_GlobalTag_cff')
 
 process.maxEvents = cms.untracked.PSet(
-    input = cms.untracked.int32(100)
+    input = cms.untracked.int32(-1)
 )
 
 # Input source
 process.source = cms.Source("PoolSource",
-    fileNames = cms.untracked.vstring('/store/mc/RunIIAutumn18MiniAOD/DYJetsToLL_M-50_HT-100to200_TuneCP5_PSweights_13TeV-madgraphMLM-pythia8/MINIAODSIM/102X_upgrade2018_realistic_v15-v2/00000/BA9E480E-209A-494A-8936-27484D4BA86A.root'),
+    fileNames = cms.untracked.vstring('root://cmseos.fnal.gov//store/user/jongho/DarkHiggs/MonoDarkHiggs/year2018/mHs50/MZprime_500_Mhs_50_Mchi_150/DarkHiggs_MonoHs_LO_MZprime_500_Mhs_50_Mchi_150_10007863_miniaod.root'),
     secondaryFileNames = cms.untracked.vstring()
 )
 
@@ -37,7 +37,7 @@ process.options = cms.untracked.PSet(
 
 # Production Info
 process.configurationMetadata = cms.untracked.PSet(
-    annotation = cms.untracked.string('mc nevts:-1'),
+    annotation = cms.untracked.string('mc2018 nevts:-1'),
     name = cms.untracked.string('Applications'),
     version = cms.untracked.string('$Revision: 1.19 $')
 )
@@ -59,7 +59,7 @@ process.NANOAODSIMoutput = cms.OutputModule("NanoAODOutputModule",
 
 # Other statements
 from Configuration.AlCa.GlobalTag import GlobalTag
-process.GlobalTag = GlobalTag(process.GlobalTag, '102X_upgrade2018_realistic_v12', '')
+process.GlobalTag = GlobalTag(process.GlobalTag, '102X_upgrade2018_realistic_v19', '')
 
 # Path and EndPath definitions
 process.nanoAOD_step = cms.Path(process.nanoSequenceMC)
@@ -70,6 +70,10 @@ process.NANOAODSIMoutput_step = cms.EndPath(process.NANOAODSIMoutput)
 process.schedule = cms.Schedule(process.nanoAOD_step,process.endjob_step,process.NANOAODSIMoutput_step)
 from PhysicsTools.PatAlgos.tools.helpers import associatePatAlgosToolsTask
 associatePatAlgosToolsTask(process)
+
+#Setup FWK for multithreaded
+process.options.numberOfThreads=cms.untracked.uint32(1)
+process.options.numberOfStreams=cms.untracked.uint32(0)
 
 # customisation of the process.
 
@@ -89,7 +93,6 @@ process = nanoTuples_customizeMC(process)
 
 # Customisation from command line
 
-process.add_(cms.Service('InitRootHandlers', EnableIMT = cms.untracked.bool(False)))
 # Add early deletion of temporary data products to reduce peak memory need
 from Configuration.StandardSequences.earlyDeleteSettings_cff import customiseEarlyDelete
 process = customiseEarlyDelete(process)
